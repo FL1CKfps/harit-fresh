@@ -1,0 +1,544 @@
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+class WeatherService {
+  constructor() {
+    this.apiKey = '90878297e8d1d8c2d9921a209d86a31b';
+    this.baseUrl = 'https://api.openweathermap.org/data/2.5';
+    this.geocodingUrl = 'https://api.openweathermap.org/geo/1.0';
+    
+    // Cache configuration
+    this.cache = new Map();
+    this.cacheExpiry = new Map();
+    this.weatherCacheTime = 10 * 60 * 1000; // 10 minutes for current weather
+    this.forecastCacheTime = 30 * 60 * 1000; // 30 minutes for forecasts
+    
+    // Location cache
+    this.lastLocation = null;
+    this.locationCacheTime = 5 * 60 * 1000; // 5 minutes location cache
+    this.lastLocationTime = 0;
+  }
+
+  // Cache management
+  setCache(key, data, expiryTime) {
+    this.cache.set(key, data);
+    this.cacheExpiry.set(key, Date.now() + expiryTime);
+  }
+
+  getCache(key) {
+    const expiry = this.cacheExpiry.get(key);
+    if (!expiry || Date.now() > expiry) {
+      this.cache.delete(key);
+      this.cacheExpiry.delete(key);
+      return null;
+    }
+    return this.cache.get(key);
+  }
+
+  // Request location permission and get current location
+  async requestLocationPermission() {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        throw new Error('Location permission not granted');
+      }
+      return true;
+    } catch (error) {
+      console.error('Location permission error:', error);
+      return false;
+    }
+  }
+
+  // Get user's current location
+  async getCurrentLocation(useCache = true) {
+    try {
+      // Check if we have a recent cached location
+      if (useCache && this.lastLocation && 
+          (Date.now() - this.lastLocationTime) < this.locationCacheTime) {
+        return this.lastLocation;
+      }
+
+      // Request permission first
+      const hasPermission = await this.requestLocationPermission();
+      if (!hasPermission) {
+        // Return Delhi as fallback since user is in Delhi
+        console.log('📍 Location permission denied, using Delhi as fallback');
+        return {
+          latitude: 28.6139, // Delhi coordinates
+          longitude: 77.2090,
+          city: 'Delhi',
+          region: 'Delhi',
+          country: 'IN'
+        };
+      }
+
+      // Get current position with high accuracy
+      console.log('📍 Getting current location...');
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        timeout: 15000, // 15 seconds timeout
+        maximumAge: 60000, // Accept location that's up to 1 minute old
+      });
+
+      console.log('📍 Location coordinates:', location.coords);
+
+      // Get city name from coordinates using reverse geocoding
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      }, { useGoogleMaps: false }); // Use system geocoding service
+
+      console.log('📍 Reverse geocoding result:', address[0]);
+
+      const locationData = {
+        latitude: parseFloat(location.coords.latitude),
+        longitude: parseFloat(location.coords.longitude),
+        city: address[0]?.city || address[0]?.district || address[0]?.subregion || 'Unknown',
+        region: address[0]?.region || address[0]?.administrativeArea || address[0]?.state || '',
+        country: address[0]?.country || 'IN',
+        fullAddress: address[0] // Keep full address for debugging
+      };
+
+      console.log('📍 Final location data:', locationData);
+
+      // Validate coordinates before caching
+      if (isNaN(locationData.latitude) || isNaN(locationData.longitude) ||
+          locationData.latitude < -90 || locationData.latitude > 90 ||
+          locationData.longitude < -180 || locationData.longitude > 180) {
+        console.error('❌ Invalid coordinates detected:', locationData);
+        throw new Error('Invalid coordinates received from GPS');
+      }
+
+      // Cache the location
+      this.lastLocation = locationData;
+      this.lastLocationTime = Date.now();
+
+      return locationData;
+    } catch (error) {
+      console.error('📍 Location error:', error);
+      // Return Delhi as fallback location since user mentioned being in Delhi
+      console.log('📍 Using Delhi as fallback location');
+      return {
+        latitude: 28.6139, // Delhi coordinates  
+        longitude: 77.2090,
+        city: 'Delhi',
+        region: 'Delhi',
+        country: 'IN'
+      };
+    }
+  }
+
+  // Make API request with error handling
+  async makeWeatherRequest(endpoint) {
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        throw new Error(`Weather API error: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Weather API request failed:', error);
+      throw new Error('Unable to fetch weather data. Please check your connection.');
+    }
+  }
+
+  // Get current weather by coordinates
+  async getCurrentWeather(lat, lon, useCache = true) {
+    if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
+      throw new Error('Invalid coordinates: lat and lon must be valid numbers');
+    }
+    const cacheKey = `current_${lat.toFixed(2)}_${lon.toFixed(2)}`;
+    
+    // Check cache first
+    if (useCache) {
+      const cached = this.getCache(cacheKey);
+      if (cached) {
+        console.log('📋 Returning cached current weather');
+        return cached;
+      }
+    }
+
+    try {
+      const endpoint = `${this.baseUrl}/weather?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`;
+      const data = await this.makeWeatherRequest(endpoint);
+      
+      // Validate weather data structure
+      if (!data || !data.main || !data.weather || !data.weather[0]) {
+        throw new Error('Invalid weather data structure received from API');
+      }
+      
+      const weatherData = {
+        location: `${data.name || 'Unknown'}, ${data.sys?.country || ''}`,
+        city: data.name || 'Unknown',
+        temperature: Math.round(data.main.temp || 25),
+        temp: Math.round(data.main.temp || 25), // Alias for consistency
+        condition: data.weather[0].main || 'Clear',
+        description: data.weather[0].description || 'Clear sky',
+        humidity: data.main.humidity || 50,
+        pressure: data.main.pressure || 1013,
+        windSpeed: Math.round((data.wind?.speed || 0) * 3.6), // Convert m/s to km/h
+        windDirection: data.wind?.deg || 0,
+        visibility: (data.visibility || 10000) / 1000, // Convert m to km
+        uvIndex: 0, // Not available in current weather, need separate call
+        sunrise: data.sys?.sunrise ? new Date(data.sys.sunrise * 1000).toLocaleTimeString('en-US', { 
+          hour: '2-digit', minute: '2-digit', hour12: true 
+        }) : '6:00 AM',
+        sunset: data.sys?.sunset ? new Date(data.sys.sunset * 1000).toLocaleTimeString('en-US', { 
+          hour: '2-digit', minute: '2-digit', hour12: true 
+        }) : '6:00 PM',
+        icon: data.weather[0].icon || '01d',
+        timestamp: Date.now(),
+        coords: { lat, lon }
+      };
+
+      // Cache the result
+      this.setCache(cacheKey, weatherData, this.weatherCacheTime);
+      return weatherData;
+    } catch (error) {
+      console.error('❌ Current weather API error:', error);
+      throw new Error(`Unable to get current weather: ${error.message}`);
+    }
+  }
+
+  // Get current weather with automatic location detection
+  async getCurrentWeatherAuto(useCache = true) {
+    try {
+      console.log('🌤️ Getting current weather with automatic location detection...');
+      
+      // First, get the current location
+      const location = await this.getCurrentLocation(useCache);
+      console.log('📍 Location obtained:', { 
+        city: location.city, 
+        lat: location.latitude, 
+        lon: location.longitude 
+      });
+      
+      // Validate coordinates
+      if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number' ||
+          isNaN(location.latitude) || isNaN(location.longitude)) {
+        throw new Error('Invalid location coordinates received from location service');
+      }
+      
+      // Get weather for the location
+      const weatherData = await this.getCurrentWeather(location.latitude, location.longitude, useCache);
+      
+      // Add location context to weather data
+      weatherData.detectedLocation = {
+        city: location.city,
+        region: location.region,
+        country: location.country
+      };
+      
+      console.log('✅ Weather data obtained successfully for:', weatherData.city);
+      return weatherData;
+      
+    } catch (error) {
+      console.error('❌ Auto weather detection error:', error);
+      throw new Error(`Unable to get weather with automatic location: ${error.message}`);
+      const weatherData = {
+        location: `${data.name || 'Unknown'}, ${data.sys?.country || ''}`,
+        city: data.name || 'Unknown',
+        temperature: Math.round(data.main.temp || 25),
+        temp: Math.round(data.main.temp || 25), // Alias for consistency
+        condition: data.weather[0].main || 'Clear',
+        description: data.weather[0].description || 'Clear sky',
+        humidity: data.main.humidity || 50,
+        pressure: data.main.pressure || 1013,
+        windSpeed: Math.round((data.wind?.speed || 0) * 3.6), // Convert m/s to km/h
+        windDirection: data.wind?.deg || 0,
+        visibility: (data.visibility || 10000) / 1000, // Convert m to km
+        uvIndex: 0, // Not available in current weather, need separate call
+        sunrise: data.sys?.sunrise ? new Date(data.sys.sunrise * 1000).toLocaleTimeString('en-US', { 
+          hour: '2-digit', minute: '2-digit', hour12: true 
+        }) : '6:00 AM',
+        sunset: data.sys?.sunset ? new Date(data.sys.sunset * 1000).toLocaleTimeString('en-US', { 
+          hour: '2-digit', minute: '2-digit', hour12: true 
+        }) : '6:00 PM',
+        icon: data.weather[0].icon || '01d',
+        timestamp: Date.now(),
+        coords: { lat, lon }
+      };
+
+      // Cache the result
+      this.setCache(cacheKey, weatherData, this.weatherCacheTime);
+      return weatherData;
+    } catch (error) {
+      console.error('❌ Current weather API error:', error);
+      throw new Error(`Unable to get current weather: ${error.message}`);
+    }
+  }
+
+  // Get current weather with automatic location detection  
+  async getCurrentWeatherAuto(useCache = true) {
+    try {
+      console.log('🌤️ Getting current weather with automatic location detection...');
+      
+      // First, get the current location and wait for it properly
+      const location = await this.getCurrentLocation(useCache);
+      
+      if (!location) {
+        throw new Error('Unable to get current location');
+      }
+      
+      console.log('📍 Location obtained:', { 
+        city: location.city, 
+        lat: location.latitude, 
+        lon: location.longitude 
+      });
+      
+      // Validate coordinates properly
+      const lat = parseFloat(location.latitude);
+      const lon = parseFloat(location.longitude);
+      
+      if (typeof lat !== 'number' || typeof lon !== 'number' ||
+          isNaN(lat) || isNaN(lon) ||
+          lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        console.error('❌ Invalid coordinates:', { lat, lon, originalLat: location.latitude, originalLon: location.longitude });
+        throw new Error(`Invalid location coordinates: lat=${lat}, lon=${lon}`);
+      }
+      
+      // Get weather for the validated location
+      const weatherData = await this.getCurrentWeather(lat, lon, useCache);
+      
+      // Add location context to weather data
+      weatherData.detectedLocation = {
+        city: location.city,
+        region: location.region,
+        country: location.country
+      };
+      
+      console.log('✅ Weather data obtained successfully for:', weatherData.city);
+      return weatherData;
+      
+    } catch (error) {
+      console.error('❌ Auto weather detection error:', error);
+      throw new Error(`Unable to get weather with automatic location: ${error.message}`);
+    }
+  }
+
+  // Get 5-day forecast
+  async getForecast(lat, lon, useCache = true) {
+    if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
+      throw new Error('Invalid coordinates: lat and lon must be valid numbers');
+    }
+    const cacheKey = `forecast_${lat.toFixed(2)}_${lon.toFixed(2)}`;
+    
+    // Check cache first
+    if (useCache) {
+      const cached = this.getCache(cacheKey);
+      if (cached) {
+        console.log('Returning cached forecast');
+        return cached;
+      }
+    }
+
+    try {
+      const endpoint = `${this.baseUrl}/forecast?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`;
+      const data = await this.makeWeatherRequest(endpoint);
+      
+      // Validate forecast data structure
+      if (!data || !data.list || !Array.isArray(data.list)) {
+        throw new Error('Invalid forecast data structure received from API');
+      }
+      
+      // Process hourly forecast (next 24 hours)
+      const hourlyForecast = data.list.slice(0, 8).map(item => ({
+        time: new Date((item.dt || Date.now()/1000) * 1000).toLocaleTimeString('en-US', { 
+          hour: '2-digit', minute: '2-digit', hour12: true 
+        }),
+        temp: Math.round(item.main?.temp || 25),
+        condition: item.weather?.[0]?.main || 'Clear',
+        description: item.weather?.[0]?.description || 'Clear sky',
+        icon: item.weather?.[0]?.icon || '01d',
+        precipitation: Math.round((item.pop || 0) * 100), // Probability of precipitation
+        humidity: item.main?.humidity || 50,
+        windSpeed: Math.round((item.wind?.speed || 0) * 3.6)
+      }));
+
+      // Process daily forecast (next 5 days)
+      const dailyForecast = [];
+      const processedDays = new Set();
+      
+      data.list.forEach(item => {
+        const date = new Date(item.dt * 1000);
+        const dayKey = date.toDateString();
+        
+        if (!processedDays.has(dayKey) && dailyForecast.length < 7) {
+          // Find min/max temperatures for this day
+          const dayItems = data.list.filter(dayItem => {
+            const dayDate = new Date(dayItem.dt * 1000);
+            return dayDate.toDateString() === dayKey;
+          });
+          
+          const temps = dayItems.map(dayItem => dayItem.main?.temp || 25);
+          const conditions = dayItems.map(dayItem => dayItem.weather?.[0] || { main: 'Clear', description: 'Clear sky', icon: '01d' });
+          
+          // Get the most common condition for the day
+          const conditionCounts = {};
+          conditions.forEach(condition => {
+            conditionCounts[condition.main] = (conditionCounts[condition.main] || 0) + 1;
+          });
+          const mostCommonCondition = Object.keys(conditionCounts).reduce(
+            (a, b) => conditionCounts[a] > conditionCounts[b] ? a : b,
+            'Clear'
+          );
+          
+          const mostCommonConditionData = conditions.find(c => c.main === mostCommonCondition) || conditions[0];
+          
+          dailyForecast.push({
+            day: dailyForecast.length === 0 ? 'Today' : 
+                 dailyForecast.length === 1 ? 'Tomorrow' : 
+                 date.toLocaleDateString('en-US', { weekday: 'short' }),
+            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            high: Math.round(Math.max(...temps)),
+            low: Math.round(Math.min(...temps)),
+            condition: mostCommonCondition,
+            description: mostCommonConditionData.description,
+            icon: mostCommonConditionData.icon,
+            precipitation: Math.round(Math.max(...dayItems.map(d => (d.pop || 0) * 100))),
+            humidity: Math.round(dayItems.reduce((sum, d) => sum + (d.main?.humidity || 50), 0) / dayItems.length),
+            windSpeed: Math.round(dayItems.reduce((sum, d) => sum + d.wind.speed, 0) / dayItems.length * 3.6)
+          });
+          
+          processedDays.add(dayKey);
+        }
+      });
+
+      const forecastData = {
+        hourly: hourlyForecast,
+        daily: dailyForecast,
+        timestamp: Date.now()
+      };
+
+      // Cache the result
+      this.setCache(cacheKey, forecastData, this.forecastCacheTime);
+      return forecastData;
+    } catch (error) {
+      console.error('Forecast fetch error:', error);
+      throw error;
+    }
+  }
+
+  // Get weather by city name
+  async getWeatherByCity(cityName, useCache = true) {
+    const cacheKey = `city_${cityName.toLowerCase()}`;
+    
+    // Check cache first
+    if (useCache) {
+      const cached = this.getCache(cacheKey);
+      if (cached) {
+        console.log('Returning cached city weather');
+        return cached;
+      }
+    }
+
+    try {
+      // First get coordinates for the city
+      const geoEndpoint = `${this.geocodingUrl}/direct?q=${encodeURIComponent(cityName)}&limit=1&appid=${this.apiKey}`;
+      const geoData = await this.makeWeatherRequest(geoEndpoint);
+      
+      if (geoData.length === 0) {
+        throw new Error('City not found');
+      }
+      
+      const { lat, lon } = geoData[0];
+      const weatherData = await this.getCurrentWeather(lat, lon, useCache);
+      
+      // Cache city coordinates for future use
+      this.setCache(cacheKey, { lat, lon, weather: weatherData }, this.forecastCacheTime);
+      return weatherData;
+    } catch (error) {
+      console.error('City weather fetch error:', error);
+      throw error;
+    }
+  }
+
+  // Get comprehensive weather data (current + forecast)
+  async getCompleteWeatherData(location = null, useCache = true) {
+    try {
+      let lat, lon, city;
+      
+      if (location && location.latitude && location.longitude) {
+        // Use provided location
+        lat = location.latitude;
+        lon = location.longitude;
+        city = location.city || 'Unknown';
+      } else if (typeof location === 'string') {
+        // Location is a city name
+        const cityWeather = await this.getWeatherByCity(location, useCache);
+        lat = cityWeather.coords.lat;
+        lon = cityWeather.coords.lon;
+        city = location;
+      } else {
+        // Get current location
+        const currentLocation = await this.getCurrentLocation(useCache);
+        lat = currentLocation.latitude;
+        lon = currentLocation.longitude;
+        city = currentLocation.city;
+      }
+
+      // Get both current weather and forecast
+      const [currentWeather, forecast] = await Promise.all([
+        this.getCurrentWeather(lat, lon, useCache),
+        this.getForecast(lat, lon, useCache)
+      ]);
+
+      return {
+        current: currentWeather,
+        forecast: forecast,
+        location: { lat, lon, city }
+      };
+    } catch (error) {
+      console.error('Complete weather data fetch error:', error);
+      throw error;
+    }
+  }
+
+  // Convert weather condition to appropriate icon name for Ionicons
+  getWeatherIcon(openWeatherIcon) {
+    const iconMap = {
+      '01d': 'sunny', // clear sky day
+      '01n': 'moon', // clear sky night
+      '02d': 'partly-sunny', // few clouds day
+      '02n': 'cloudy-night', // few clouds night
+      '03d': 'cloudy', // scattered clouds
+      '03n': 'cloudy',
+      '04d': 'cloudy', // broken clouds
+      '04n': 'cloudy',
+      '09d': 'rainy', // shower rain
+      '09n': 'rainy',
+      '10d': 'rainy', // rain day
+      '10n': 'rainy', // rain night
+      '11d': 'thunderstorm', // thunderstorm
+      '11n': 'thunderstorm',
+      '13d': 'snow', // snow
+      '13n': 'snow',
+      '50d': 'cloudy', // mist
+      '50n': 'cloudy'
+    };
+    
+    return iconMap[openWeatherIcon] || 'partly-sunny';
+  }
+
+  // Clear all weather cache
+  clearCache() {
+    this.cache.clear();
+    this.cacheExpiry.clear();
+    this.lastLocation = null;
+    this.lastLocationTime = 0;
+  }
+
+  // Get cache statistics
+  getCacheStats() {
+    return {
+      totalCached: this.cache.size,
+      cacheKeys: Array.from(this.cache.keys()),
+      lastLocationCache: this.lastLocationTime ? new Date(this.lastLocationTime).toLocaleString() : 'None'
+    };
+  }
+}
+
+// Create singleton instance
+const weatherService = new WeatherService();
+
+export default weatherService;

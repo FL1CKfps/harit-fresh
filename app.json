@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Harit - Farming Assistant",
+    "slug": "harit-farming-assistant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4CAF50"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.harit.farmingassistant",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to your location to provide accurate weather data and location-based farming advice.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to your location to provide accurate weather data and location-based farming advice."
+      }
+    },
+    "android": {
+      "package": "com.harit.farmingassistant",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#4CAF50"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "agrocure",
+    "permissions": [
+      "LOCATION"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d5ec2570-caae-4b69-a01b-b77e9eb13c59"
+      }
+    }
+  }
+}
