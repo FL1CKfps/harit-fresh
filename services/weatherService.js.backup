@@ -1,9 +1,10 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { OPENWEATHER_API_KEY } from 'expo-env';
 
 class WeatherService {
   constructor() {
-    this.apiKey = '90878297e8d1d8c2d9921a209d86a31b';
+    this.apiKey = OPENWEATHER_API_KEY;
     this.baseUrl = 'https://api.openweathermap.org/data/2.5';
     this.geocodingUrl = 'https://api.openweathermap.org/geo/1.0';
     

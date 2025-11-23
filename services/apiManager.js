@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { OPENROUTER_API_KEY } from 'expo-env';
 
 class APIManager {
   constructor() {
     // OpenRouter configuration
-    this.openRouterKey = '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';
+    this.openRouterKey = OPENROUTER_API_KEY;
     this.openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
     this.modelName = 'x-ai/grok-4.1-fast';
     

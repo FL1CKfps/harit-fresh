@@ -1,8 +1,10 @@
 
+import { DATA_GOV_API_KEY, CSC_API_KEY } from 'expo-env';
+
 class MarketService {
   constructor() {
     // Data.gov.in API configuration - Direct client integration
-    this.dataGovApiKey = '579b464db66ec23bdd00000151d86cef0143446b7d39f7425d6afd7f';
+    this.dataGovApiKey = DATA_GOV_API_KEY;
     this.dataGovBaseUrl = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
     
     // Cache configuration
@@ -13,7 +15,7 @@ class MarketService {
     // API endpoints for Indian states and cities (CountryStateCity)
     this.statesApiUrl = 'https://api.countrystatecity.in/v1/countries/IN/states';
     this.citiesApiUrl = 'https://api.countrystatecity.in/v1/countries/IN/states/{state_iso}/cities';
-    this.apiKey = 'NHhvOEcyWk50N2Vna3VFTE00bFp3MjFKR0ZEOUhkZlg4RTk1MlJlaA=='; // Free API key for countrystatecity.in
+    this.apiKey = CSC_API_KEY; // Free API key for countrystatecity.in
 
     // Initialize state and city data
     this.statesData = null;

@@ -6,7 +6,7 @@ if (typeof fetch === 'undefined') {
 // Simplified MarketService implementation for testing
 class TestMarketService {
   constructor() {
-    this.dataGovApiKey = '579b464db66ec23bdd00000151d86cef0143446b7d39f7425d6afd7f';
+    this.dataGovApiKey = process.env.DATA_GOV_API_KEY || '579b464db66ec23bdd00000151d86cef0143446b7d39f7425d6afd7f';
     this.dataGovBaseUrl = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
   }
 
